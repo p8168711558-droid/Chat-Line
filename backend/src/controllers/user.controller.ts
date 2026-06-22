@@ -36,15 +36,21 @@ export const getUsers = async (req: AuthRequest, res: Response) => {
     const unreadCountMap = new Map<string, number>();
 
     for (const msg of messages) {
-      const otherId = msg.senderId === myId ? msg.receiverId : msg.senderId;
+      const otherId =
+  msg.senderId === myId ? msg.receiverId : msg.senderId;
 
-      if (!lastMessageMap.has(otherId)) {
-        lastMessageMap.set(otherId, msg);
-      }
+if (!otherId) continue;
 
-      if (msg.receiverId === myId && !msg.read) {
-        unreadCountMap.set(otherId, (unreadCountMap.get(otherId) || 0) + 1);
-      }
+if (!lastMessageMap.has(otherId)) {
+  lastMessageMap.set(otherId, msg);
+}
+
+if (msg.receiverId === myId && !msg.read) {
+  unreadCountMap.set(
+    otherId,
+    (unreadCountMap.get(otherId) || 0) + 1
+  );
+}
     }
 
     const enrichedUsers = users.map((u) => ({
