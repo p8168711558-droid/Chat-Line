@@ -6,6 +6,7 @@ type NotificationPayload = {
   senderId: string;
   senderName?: string;
   receiverId: string;
+  groupId?: string | null;
   content: string;
   type?: string;
   fileUrl?: string;

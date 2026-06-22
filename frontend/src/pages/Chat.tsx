@@ -89,7 +89,13 @@ const formatLastSeen = (value?: string | Date | null) => {
   return `Last seen ${date.toLocaleDateString()} at ${time}`;
 };
 
-export default function Chat({ currentUser, selectedUser, selectedGroup, onlineUsers, onSelectUser }: Props) {
+export default function Chat({
+  currentUser,
+  selectedUser,
+ selectedGroup,
+  onlineUsers,
+  onSelectUser: _onSelectUser,
+}: Props) {
   const { startCall } = useCall();
   const [messages, setMessages] = useState<Message[]>([]);
   const [text, setText] = useState("");

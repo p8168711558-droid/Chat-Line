@@ -5,7 +5,6 @@ import { socket } from "./socket";
 import Chat from "./pages/Chat";
 import { api } from "./api/api";
 import { CallProvider } from "./context/CallContext";
-import { useNotifications } from "./hooks/useNotifications";
 
 function App() {
   const [user, setUser] = useState<any>(null);
@@ -138,7 +137,13 @@ function App() {
 
           <div className="flex-1">
             {selectedUser || selectedGroup ? (
-              <Chat currentUser={user} selectedUser={selectedUser} selectedGroup={selectedGroup} onlineUsers={onlineUserIds} />
+             <Chat
+  currentUser={user}
+  selectedUser={selectedUser}
+  selectedGroup={selectedGroup}
+  onlineUsers={onlineUserIds}
+  onSelectUser={setSelectedUser}
+/>
             ) : (
               <div className="h-full flex items-center justify-center text-[#B5B5B2] text-sm">
                 Select someone from the list to start chatting

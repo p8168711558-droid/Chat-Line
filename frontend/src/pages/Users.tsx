@@ -2,20 +2,18 @@ import { useEffect, useState } from "react";
 import { api } from "../api/api";
 import { socket } from "../socket";
 
-type Props = {
-  currentUser: any;
-  selectedUser: any;
-  selectedGroup: any;
-  onSelectUser: (user: any) => void;
-  onSelectGroup: (group: any) => void;
-};
-
 type User = {
   id: string;
   username: string;
   email: string;
   isOnline: boolean;
   lastSeen?: string;
+  lastMessage?: {
+    senderId: string;
+    content: string;
+    createdAt?: string;
+  } | null;
+  unreadCount?: number;
 };
 
 type Group = {
@@ -24,7 +22,15 @@ type Group = {
   members: { user: User }[];
 };
 
-const sortByRecent = (list: any[]) => {
+type Props = {
+  currentUser: User;
+  selectedUser: User | null;
+  selectedGroup: Group | null;
+  onSelectUser: (user: User) => void;
+  onSelectGroup: (group: Group) => void;
+};
+
+const sortByRecent = (list: User[]) => {
   return [...list].sort((a, b) => {
     const at = a.lastMessage?.createdAt ? new Date(a.lastMessage.createdAt).getTime() : 0;
     const bt = b.lastMessage?.createdAt ? new Date(b.lastMessage.createdAt).getTime() : 0;
@@ -33,23 +39,13 @@ const sortByRecent = (list: any[]) => {
   });
 };
 
-const formatPreviewTime = (dateStr: string) => {
-  const date = new Date(dateStr);
-  const now = new Date();
-  const isToday = date.toDateString() === now.toDateString();
-
-  if (isToday) {
-    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  }
-
-  const yesterday = new Date(now);
-  yesterday.setDate(now.getDate() - 1);
-  if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
-
-  return date.toLocaleDateString([], { day: "2-digit", month: "short" });
-};
-
-export default function Users({ currentUser, selectedUser, selectedGroup, onSelectUser, onSelectGroup }: Props) {
+export default function Users({
+  currentUser,
+  selectedUser,
+  selectedGroup,
+  onSelectUser,
+  onSelectGroup,
+}: Props) {
   const [users, setUsers] = useState<User[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [onlineIds, setOnlineIds] = useState<Set<string>>(new Set());
@@ -61,15 +57,12 @@ export default function Users({ currentUser, selectedUser, selectedGroup, onSele
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
   const [creatingGroup, setCreatingGroup] = useState(false);
 
-  useEffect(() => {
-    fetchUsers();
-    fetchGroups();
-  }, []);
-
   const fetchUsers = async () => {
     try {
       const res = await api.get("/users");
-      setUsers(sortByRecent(res.data.users));
+      setUsers(sortByRecent(res.data.users || []));
+    } catch (err) {
+      console.error("Failed to fetch users", err);
     } finally {
       setLoading(false);
     }
@@ -84,10 +77,33 @@ export default function Users({ currentUser, selectedUser, selectedGroup, onSele
     }
   };
 
+  useEffect(() => {
+    fetchUsers();
+    fetchGroups();
+  }, []);
+
+  useEffect(() => {
+    const handleOnlineUsers = (ids: string[]) => {
+      setOnlineIds(new Set(ids));
+    };
+
+    socket.on("online-users", handleOnlineUsers);
+
+    return () => {
+      socket.off("online-users", handleOnlineUsers);
+    };
+  }, []);
+
   const handleMemberToggle = (userId: string) => {
     setSelectedMembers((prev) =>
       prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]
     );
+  };
+
+  const resetCreateForm = () => {
+    setShowCreateGroup(false);
+    setGroupName("");
+    setSelectedMembers([]);
   };
 
   const handleCreateGroup = async (e: React.FormEvent) => {
@@ -100,6 +116,7 @@ export default function Users({ currentUser, selectedUser, selectedGroup, onSele
         name: groupName.trim(),
         memberIds: selectedMembers,
       });
+
       const newGroup = res.data.group;
       setGroups((prev) => [newGroup, ...prev]);
       resetCreateForm();
@@ -110,85 +127,14 @@ export default function Users({ currentUser, selectedUser, selectedGroup, onSele
     }
   };
 
-  const resetCreateForm = () => {
-    setShowCreateGroup(false);
-    setGroupName("");
-    setSelectedMembers([]);
+  const handleSelectUser = (u: User) => {
+    onSelectGroup(null as any); // clear selected group when opening user chat
+    onSelectUser(u);
   };
 
-  // Online status
-  useEffect(() => {
-    const handleOnlineUsers = (ids: string[]) => {
-      setOnlineIds(new Set(ids));
-    };
-    socket.on("online-users", handleOnlineUsers);
-    return () => socket.off("online-users", handleOnlineUsers);
-  }, []);
-
-  // New user registered
-  useEffect(() => {
-    const handleNewUser = (newUser: User) => {
-      setUsers((prev) => {
-        if (prev.some((u) => u.id === newUser.id)) return prev;
-        return sortByRecent([...prev, { ...newUser, lastMessage: null, unreadCount: 0 }]);
-      });
-    };
-    socket.on("new-user", handleNewUser);
-    return () => socket.off("new-user", handleNewUser);
-  }, []);
-
-  // Last seen updates
-  useEffect(() => {
-    const handleLastSeen = ({ userId, lastSeen }: { userId: string; lastSeen: string }) => {
-      setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, lastSeen } : u)));
-    };
-    socket.on("user-last-seen", handleLastSeen);
-    return () => socket.off("user-last-seen", handleLastSeen);
-  }, []);
-
-  // Preview + unread badge
-  useEffect(() => {
-    const updatePreview = (msg: any, isIncoming: boolean) => {
-      const chatKey = msg.groupId || (isIncoming ? msg.senderId : msg.receiverId);
-      const isGroup = !!msg.groupId;
-      const targetId = isGroup ? msg.groupId : (isIncoming ? msg.senderId : msg.receiverId);
-
-      setUsers((prev) => {
-        const updated = prev.map((u) => {
-          if (u.id !== targetId) return u;
-          const isOpenChat = selectedUser?.id === otherId;
-          const bumpUnread = isIncoming && !isOpenChat;
-          return {
-            ...u,
-            lastMessage: msg,
-            unreadCount: bumpUnread ? (u.unreadCount || 0) + 1 : u.unreadCount,
-          };
-        });
-        return sortByRecent(updated);
-      });
-      
-      setGroups((prev) => {
-        return prev.map((g) => {
-          if (g.id !== targetId) return g;
-          return { ...g, lastMessage: msg };
-        });
-      });
-    };
-
-    const handleReceive = (msg: any) => updatePreview(msg, true);
-    const handleSent = (msg: any) => updatePreview(msg, false);
-
-    socket.on("receive-message", handleReceive);
-    socket.on("message-sent", handleSent);
-
-    return () => {
-      socket.off("receive-message", handleReceive);
-      socket.off("message-sent", handleSent);
-    };
-  }, [selectedUser?.id, selectedGroup?.id]);
-
-  const handleSelectUser = (u: User) => {
-    onSelectUser(u);
+  const handleSelectGroup = (g: Group) => {
+    onSelectUser(null as any); // clear selected user when opening group chat
+    onSelectGroup(g);
   };
 
   const onlineCount = users.filter((u) => onlineIds.has(u.id)).length;
@@ -198,10 +144,9 @@ export default function Users({ currentUser, selectedUser, selectedGroup, onSele
       <div className="px-5 py-4 border-b border-[#F0F0EE] flex items-center justify-between">
         <div>
           <h2 className="text-sm font-semibold text-[#1A1A1A]">Chats</h2>
-          <p className="text-xs text-[#8A8A8E] mt-0.5">
-            {onlineCount} online
-          </p>
+          <p className="text-xs text-[#8A8A8E] mt-0.5">{onlineCount} online</p>
         </div>
+
         <button
           type="button"
           onClick={() => {
@@ -228,10 +173,10 @@ export default function Users({ currentUser, selectedUser, selectedGroup, onSele
         <div className="shrink-0 border-b border-[#F0F0EE] bg-[#FAFAF8]">
           <div className="px-4 py-3">
             <p className="text-xs font-semibold text-[#1A1A1A] mb-2">
-              {!groupName ? "Select members for new group" : "Group name"}
+              {!groupName.trim() ? "Select members for new group" : "Group name"}
             </p>
 
-            {!groupName ? (
+            {!groupName.trim() ? (
               <>
                 <div className="max-h-48 overflow-y-auto space-y-1 mb-3">
                   {users.map((u) => {
@@ -251,7 +196,7 @@ export default function Users({ currentUser, selectedUser, selectedGroup, onSele
                           <div className="h-8 w-8 rounded-full bg-[#4338CA] flex items-center justify-center text-white text-[10px] font-semibold">
                             {u.username.slice(0, 2).toUpperCase()}
                           </div>
-                          {u.isOnline && (
+                          {onlineIds.has(u.id) && (
                             <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border-2 border-[#FAFAF8] bg-[#10B981]" />
                           )}
                         </div>
@@ -260,10 +205,9 @@ export default function Users({ currentUser, selectedUser, selectedGroup, onSele
                     );
                   })}
                 </div>
+
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-[10px] text-[#8A8A8E]">
-                    {selectedMembers.length} selected
-                  </span>
+                  <span className="text-[10px] text-[#8A8A8E]">{selectedMembers.length} selected</span>
                   <div className="flex gap-2">
                     <button
                       type="button"
@@ -276,7 +220,6 @@ export default function Users({ currentUser, selectedUser, selectedGroup, onSele
                       type="button"
                       onClick={() => {
                         if (selectedMembers.length > 0) {
-                          // Will show name input via the groupName check below
                           setGroupName(" ");
                         }
                       }}
@@ -299,9 +242,7 @@ export default function Users({ currentUser, selectedUser, selectedGroup, onSele
                   className="w-full rounded-lg border border-[#E5E5E3] bg-white px-3 py-2 text-xs text-[#1A1A1A] placeholder-[#B5B5B2] outline-none focus:border-[#4338CA] mb-2"
                 />
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-[10px] text-[#8A8A8E]">
-                    {selectedMembers.length} members
-                  </span>
+                  <span className="text-[10px] text-[#8A8A8E]">{selectedMembers.length} members</span>
                   <div className="flex gap-2">
                     <button
                       type="button"
@@ -333,19 +274,18 @@ export default function Users({ currentUser, selectedUser, selectedGroup, onSele
             {groups.length > 0 && (
               <div className="border-b border-[#F0F0EE]">
                 <div className="px-5 py-2">
-                  <h3 className="text-[10px] font-semibold text-[#8A8A8E] uppercase tracking-wide">Groups</h3>
+                  <h3 className="text-[10px] font-semibold text-[#8A8A8E] uppercase tracking-wide">
+                    Groups
+                  </h3>
                 </div>
+
                 {groups.map((g) => {
                   const isSelected = selectedGroup?.id === g.id;
-                  const memberNames = (g.members || [])
-                    .map((m: any) => m.user?.username)
-                    .filter(Boolean)
-                    .join(", ");
 
                   return (
                     <button
                       key={g.id}
-                      onClick={() => onSelectGroup(g)}
+                      onClick={() => handleSelectGroup(g)}
                       className={`w-full flex items-center gap-3 px-5 py-2.5 text-left transition ${
                         isSelected ? "bg-[#EEF2FF]" : "hover:bg-[#FAFAF8]"
                       }`}
@@ -369,11 +309,15 @@ export default function Users({ currentUser, selectedUser, selectedGroup, onSele
 
             <div>
               <div className="px-5 py-2">
-                <h3 className="text-[10px] font-semibold text-[#8A8A8E] uppercase tracking-wide">Contacts</h3>
+                <h3 className="text-[10px] font-semibold text-[#8A8A8E] uppercase tracking-wide">
+                  Contacts
+                </h3>
               </div>
+
               {users.length === 0 && groups.length === 0 ? (
                 <p className="px-5 py-4 text-xs text-[#B5B5B2]">No users yet.</p>
               ) : null}
+
               {users.map((u) => {
                 const isOnline = onlineIds.has(u.id);
                 const isSelected = selectedUser?.id === u.id;
@@ -406,6 +350,12 @@ export default function Users({ currentUser, selectedUser, selectedGroup, onSele
                       <p className="text-sm font-medium text-[#1A1A1A] truncate">{u.username}</p>
                       <p className="text-[10px] text-[#8A8A8E] truncate mt-0.5">{preview}</p>
                     </div>
+
+                    {!!u.unreadCount && u.unreadCount > 0 && (
+                      <span className="min-w-[20px] h-5 px-1.5 rounded-full bg-[#4338CA] text-white text-[10px] flex items-center justify-center">
+                        {u.unreadCount}
+                      </span>
+                    )}
                   </button>
                 );
               })}
