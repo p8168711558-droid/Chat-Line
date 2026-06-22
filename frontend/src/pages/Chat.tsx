@@ -370,9 +370,6 @@ export default function Chat({
     };
   }, [pendingFile]);
 
-  const statusText = isTyping ? "Typing..." : isReceiverOnline ? "Online" : formatLastSeen(lastSeen);
-  const statusColor = isTyping ? "text-[#4338CA]" : isReceiverOnline ? "text-[#10B981]" : "text-[#B5B5B2]";
-
   const chatTitle = selectedGroup
     ? selectedGroup.name
     : selectedUser?.username;
