@@ -1,0 +1,80 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id       String    @id @default(cuid())
+  username String    @unique
+  email    String    @unique
+  password String
+  isOnline Boolean   @default(false)
+  lastSeen DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  groups UserGroup[]
+}
+
+model Group {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members UserGroup[]
+  messages Message[]
+}
+
+model UserGroup {
+  id        String   @id @default(cuid())
+  userId    String
+  groupId   String
+  joinedAt  DateTime @default(now())
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, groupId])
+}
+
+model Message {
+  id String @id @default(cuid())
+
+  senderId   String
+  receiverId String?
+  groupId    String?
+  group      Group? @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  content String
+
+  type String @default("text") // text, voice_call, video_call, file, image, video, group
+
+  delivered Boolean @default(false)
+  read      Boolean @default(false)
+
+  fileUrl    String?
+  fileName   String?
+  fileType   String?
+
+  createdAt DateTime @default(now())
+}
+
+model CallHistory {
+  id String @id @default(cuid())
+
+  callerId   String
+  receiverId String
+
+  callType String // audio/video
+  status   String // completed, missed, rejected
+
+  duration Int @default(0)
+
+  createdAt DateTime @default(now())
+}
