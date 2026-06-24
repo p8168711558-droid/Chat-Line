@@ -4,18 +4,136 @@ import Users from "./pages/Users";
 import { socket } from "./socket";
 import Chat from "./pages/Chat";
 import { api } from "./api/api";
-import { CallProvider } from "./context/CallContext";
+import { CallProvider, useCall } from "./context/CallContext";
+import Sidebar from "./components/Sidebar";
+import type { ActiveAction } from "./components/Sidebar";
+import EmailReply from "./components/EmailReply";
+import DocGenerate from "./components/DocGenerate";
+import DocRead from "./components/DocRead";
+
+function AppContent({
+  user,
+  connected,
+  onLogout,
+}: {
+  user: any;
+  connected: boolean;
+  onLogout: () => void;
+}) {
+  const [selectedUser, setSelectedUser] = useState<any>(null);
+  const [selectedGroup, setSelectedGroup] = useState<any>(null);
+  const [onlineUserIds, setOnlineUserIds] = useState<string[]>([]);
+  const [activeAction, setActiveAction] = useState<ActiveAction>("chat");
+
+  const { startCall } = useCall();
+
+  useEffect(() => {
+    if (!user) return;
+
+    socket.connect();
+
+    socket.on("connect", () => {
+      console.log("Connected:", socket.id);
+      socket.emit("user-online", user.id);
+    });
+
+    socket.on("online-users", (ids: string[]) => {
+      setOnlineUserIds(ids);
+    });
+
+    return () => {
+      socket.off("connect");
+      socket.disconnect();
+    };
+  }, [user]);
+
+  const renderContent = () => {
+    switch (activeAction) {
+      case "chat":
+        return (
+          <>
+            <Users
+              currentUser={user}
+              selectedUser={selectedUser}
+              selectedGroup={selectedGroup}
+              onSelectUser={setSelectedUser}
+              onSelectGroup={setSelectedGroup}
+              mode="chat"
+            />
+            <div className="flex-1">
+              {selectedUser || selectedGroup ? (
+                <Chat
+                  currentUser={user}
+                  selectedUser={selectedUser}
+                  selectedGroup={selectedGroup}
+                  onlineUsers={onlineUserIds}
+                  onSelectUser={setSelectedUser}
+                />
+              ) : (
+                <div className="h-full flex items-center justify-center text-[#B5B5B2] text-sm bg-white">
+                  Select someone from the list to start chatting
+                </div>
+              )}
+            </div>
+          </>
+        );
+      case "call_voice":
+      case "call_video":
+        return (
+          <>
+            <Users
+              currentUser={user}
+              selectedUser={null}
+              selectedGroup={null}
+              onSelectUser={() => {}}
+              onSelectGroup={() => {}}
+              mode={activeAction}
+              onCallUser={(u, type) => startCall({ id: u.id, username: u.username }, type)}
+            />
+            <div className="flex-1 h-full flex items-center justify-center bg-white text-[#B5B5B2] text-sm">
+              Select a contact to initiate a {activeAction === "call_voice" ? "Voice" : "Video"} Call
+            </div>
+          </>
+        );
+      case "email_reply":
+        return <EmailReply userEmail={user.email} />;
+      case "email_drafting":
+        return (
+          <div className="flex-1 h-full flex items-center justify-center bg-white">
+            <div className="text-center space-y-2">
+              <h2 className="text-xl font-semibold text-[#1A1A1A]">Email - Drafting</h2>
+              <p className="text-sm text-[#8A8A8E]">This feature is under construction.</p>
+            </div>
+          </div>
+        );
+      case "doc_generate":
+        return <DocGenerate />;
+      case "doc_read":
+        return <DocRead />;
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <div className="flex h-screen bg-[#FAFAF8] overflow-hidden">
+      <Sidebar
+        user={user}
+        connected={connected}
+        onLogout={onLogout}
+        activeAction={activeAction}
+        onActionChange={setActiveAction}
+      />
+      {renderContent()}
+    </div>
+  );
+}
 
 function App() {
   const [user, setUser] = useState<any>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [connected, setConnected] = useState(false);
-  const [selectedUser, setSelectedUser] = useState<any>(null);
-  const [selectedGroup, setSelectedGroup] = useState<any>(null);
-  const [onlineUserIds, setOnlineUserIds] = useState<string[]>([]);
 
-  // Runs once on app load (including page refresh): if a token is saved,
-  // validate it against the backend and restore the session.
   useEffect(() => {
     const token = localStorage.getItem("token");
 
@@ -40,26 +158,20 @@ function App() {
   useEffect(() => {
     if (!user) return;
 
-    socket.connect();
+    // Use a separate handler for 'connect'/'disconnect' to manage 'connected' state properly
+    // so it doesn't fight with the one inside AppContent
+    const handleConnect = () => setConnected(true);
+    const handleDisconnect = () => setConnected(false);
 
-    socket.on("connect", () => {
-      console.log("Connected:", socket.id);
-      setConnected(true);
-      socket.emit("user-online", user.id);
-    });
+    socket.on("connect", handleConnect);
+    socket.on("disconnect", handleDisconnect);
 
-    socket.on("online-users", (ids: string[]) => {
-      setOnlineUserIds(ids);
-    });
-
-    socket.on("disconnect", () => {
-      setConnected(false);
-    });
+    // Initial check in case it's already connected (AppContent calls connect)
+    if (socket.connected) setConnected(true);
 
     return () => {
-      socket.off("connect");
-      socket.off("disconnect");
-      socket.disconnect();
+      socket.off("connect", handleConnect);
+      socket.off("disconnect", handleDisconnect);
     };
   }, [user]);
 
@@ -67,8 +179,7 @@ function App() {
     localStorage.removeItem("token");
     socket.disconnect();
     setUser(null);
-    setSelectedUser(null);
-  }
+  };
 
   if (checkingAuth) {
     return (
@@ -90,68 +201,7 @@ function App() {
 
   return (
     <CallProvider currentUser={user}>
-      <div className="min-h-screen bg-[#FAFAF8]">
-        <header className="flex items-center justify-between px-6 py-3.5 bg-white border-b border-[#F0F0EE]">
-          <div className="flex items-center gap-2">
-            <div className="h-8 w-8 rounded-lg bg-[#4338CA] flex items-center justify-center">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                <path
-                  d="M21 11.5a8.5 8.5 0 0 1-12.36 7.58L3 20l1.07-5.4A8.5 8.5 0 1 1 21 11.5Z"
-                  fill="white"
-                  opacity="0.95"
-                />
-              </svg>
-            </div>
-            <span className="font-semibold text-[#1A1A1A] tracking-tight">ChatLine</span>
-          </div>
-
-          <div className="flex items-center gap-4">
-            <span className="text-sm text-[#4A4A4E]">{user.username}</span>
-
-            <span
-              className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${
-                connected ? "bg-[#ECFDF5] text-[#047857]" : "bg-[#FEF2F2] text-[#B91C1C]"
-              }`}
-            >
-              <span className={`h-1.5 w-1.5 rounded-full ${connected ? "bg-[#10B981]" : "bg-[#EF4444]"}`} />
-              {connected ? "Connected" : "Disconnected"}
-            </span>
-
-            <button
-              onClick={handleLogout}
-              className="text-xs font-medium text-[#8A8A8E] hover:text-[#1A1A1A] transition"
-            >
-              Log out
-            </button>
-          </div>
-        </header>
-
-        <div className="flex" style={{ height: "calc(100vh - 57px)" }}>
-          <Users
-            currentUser={user}
-            selectedUser={selectedUser}
-            selectedGroup={selectedGroup}
-            onSelectUser={setSelectedUser}
-            onSelectGroup={setSelectedGroup}
-          />
-
-          <div className="flex-1">
-            {selectedUser || selectedGroup ? (
-             <Chat
-  currentUser={user}
-  selectedUser={selectedUser}
-  selectedGroup={selectedGroup}
-  onlineUsers={onlineUserIds}
-  onSelectUser={setSelectedUser}
-/>
-            ) : (
-              <div className="h-full flex items-center justify-center text-[#B5B5B2] text-sm">
-                Select someone from the list to start chatting
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
+      <AppContent user={user} connected={connected} onLogout={handleLogout} />
     </CallProvider>
   );
 }

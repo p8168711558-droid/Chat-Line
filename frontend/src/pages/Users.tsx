@@ -28,6 +28,8 @@ type Props = {
   selectedGroup: Group | null;
   onSelectUser: (user: User) => void;
   onSelectGroup: (group: Group) => void;
+  mode?: "chat" | "call_voice" | "call_video";
+  onCallUser?: (user: User, type: "audio" | "video") => void;
 };
 
 const sortByRecent = (list: User[]) => {
@@ -45,6 +47,8 @@ export default function Users({
   selectedGroup,
   onSelectUser,
   onSelectGroup,
+  mode = "chat",
+  onCallUser,
 }: Props) {
   const [users, setUsers] = useState<User[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
@@ -128,6 +132,14 @@ export default function Users({
   };
 
   const handleSelectUser = (u: User) => {
+    if (mode === "call_voice" && onCallUser) {
+      onCallUser(u, "audio");
+      return;
+    }
+    if (mode === "call_video" && onCallUser) {
+      onCallUser(u, "video");
+      return;
+    }
     onSelectGroup(null as any); // clear selected group when opening user chat
     onSelectUser(u);
   };
@@ -143,7 +155,9 @@ export default function Users({
     <div className="w-80 shrink-0 bg-white border-r border-[#F0F0EE] flex flex-col">
       <div className="px-5 py-4 border-b border-[#F0F0EE] flex items-center justify-between">
         <div>
-          <h2 className="text-sm font-semibold text-[#1A1A1A]">Chats</h2>
+          <h2 className="text-sm font-semibold text-[#1A1A1A]">
+            {mode === "chat" ? "Chats" : mode === "call_voice" ? "Voice Call" : "Video Call"}
+          </h2>
           <p className="text-xs text-[#8A8A8E] mt-0.5">{onlineCount} online</p>
         </div>
 
